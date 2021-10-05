@@ -1,0 +1,36 @@
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    main: ./cmd/wd
+brews:
+  - tap:
+      owner: reddec
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    folder: Formula
+    homepage:  https://github.com/reddec/wd
+    description: Yet another webhook daemon
+    license: MIT
+    test: |
+      system "#{bin}/wd --help"
+    install: |-
+      bin.install "wd"
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^build:'

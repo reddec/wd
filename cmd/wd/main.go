@@ -14,6 +14,7 @@ import (
 	"github.com/jessevdk/go-flags"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/reddec/wd"
+	"github.com/rs/cors"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -21,6 +22,7 @@ type Config struct {
 	Serve CmdServe `command:"serve" description:"serve server from directory"`
 	Run   CmdRun   `command:"run" description:"run single script"`
 
+	CORS           bool          `long:"cors" env:"CORS" description:"Enable CORS"`
 	Bind           string        `short:"b" long:"bind" env:"BIND" description:"Binding address" default:"127.0.0.1:8080"`
 	Timeout        time.Duration `short:"t" long:"timeout" env:"TIMEOUT" description:"Maximum execution timeout" default:"120s"`
 	Tokens         []string      `short:"T" long:"tokens" env:"TOKENS" description:"Basic authorization (if at least one defined) by Authorization content or token in query"`
@@ -116,9 +118,15 @@ func runWebhook(global context.Context, webhook *wd.Webhook) error {
 		mux.Handle("/", protected(config.Tokens, webhook))
 	}
 
+	var handler http.Handler = mux
+
+	if config.CORS {
+		handler = cors.AllowAll().Handler(handler)
+	}
+
 	srv := http.Server{
 		Addr:    config.Bind,
-		Handler: mux,
+		Handler: handler,
 	}
 
 	ctx, cancel := context.WithCancel(global)

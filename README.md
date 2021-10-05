@@ -1,4 +1,5 @@
 # Webhook daemon
+[![Build and release](https://github.com/reddec/wd/actions/workflows/release.yaml/badge.svg)](https://github.com/reddec/wd/actions/workflows/release.yaml)
 
 Yet another application which can run scripts on request.
 
@@ -29,6 +30,7 @@ Usage:
   wd [OPTIONS] <run | serve>
 
 Application Options:
+      --cors                Enable CORS [$CORS]
   -b, --bind=               Binding address (default: 127.0.0.1:8080) [$BIND]
   -t, --timeout=            Maximum execution timeout (default: 120s) [$TIMEOUT]
   -T, --tokens=             Basic authorization (if at least one defined) by Authorization content or token in query [$TOKENS]
@@ -58,6 +60,7 @@ Usage:
   wd [OPTIONS] run [Binary] [Args...]
 
 Application Options:
+      --cors                Enable CORS [$CORS]
   -b, --bind=               Binding address (default: 127.0.0.1:8080) [$BIND]
   -t, --timeout=            Maximum execution timeout (default: 120s) [$TIMEOUT]
   -T, --tokens=             Basic authorization (if at least one defined) by Authorization content or token in query [$TOKENS]
@@ -100,6 +103,7 @@ Usage:
   wd [OPTIONS] serve [serve-OPTIONS] [Scripts]
 
 Application Options:
+      --cors                Enable CORS [$CORS]
   -b, --bind=                  Binding address (default: 127.0.0.1:8080) [$BIND]
   -t, --timeout=               Maximum execution timeout (default: 120s) [$TIMEOUT]
   -T, --tokens=                Basic authorization (if at least one defined) by Authorization content or token in query [$TOKENS]

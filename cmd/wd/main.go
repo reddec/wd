@@ -9,8 +9,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/jessevdk/go-flags"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/reddec/wd"
@@ -21,11 +23,12 @@ import (
 type Config struct {
 	Serve CmdServe `command:"serve" description:"serve server from directory"`
 	Run   CmdRun   `command:"run" description:"run single script"`
+	Token CmdToken `command:"token" description:"issue token"`
 
 	CORS           bool          `long:"cors" env:"CORS" description:"Enable CORS"`
 	Bind           string        `short:"b" long:"bind" env:"BIND" description:"Binding address" default:"127.0.0.1:8080"`
 	Timeout        time.Duration `short:"t" long:"timeout" env:"TIMEOUT" description:"Maximum execution timeout" default:"120s"`
-	Tokens         []string      `short:"T" long:"tokens" env:"TOKENS" description:"Basic authorization (if at least one defined) by Authorization content or token in query"`
+	Secret         string        `short:"s" long:"secret" env:"SECRET" description:"JWT secret for checking tokens. Use token command to create token"`
 	Buffer         int           `short:"B" long:"buffer" env:"BUFFER" description:"Buffer response size" default:"8192"`
 	DisableMetrics bool          `short:"M" long:"disable-metrics" env:"DISABLE_METRICS" description:"Disable prometheus metrics"`
 	// TLS
@@ -52,6 +55,14 @@ type CmdRun struct {
 	} `positional-args:"yes"`
 }
 
+type CmdToken struct {
+	Name       string        `short:"n" long:"name" env:"NAME" description:"Name of token, will be mapped as sub"`
+	Expiration time.Duration `short:"e" long:"expiration" env:"EXPIRATION" description:"Token expiration. Zero means no expiration" default:"0"`
+	Args       struct {
+		Hooks []string `positional-arg:"hooks" description:"allowed hooks (nothing means all hooks)"`
+	} `positional-args:"yes"`
+}
+
 var config Config
 
 func main() {
@@ -68,6 +79,8 @@ func main() {
 		err = serve(ctx)
 	case "run":
 		err = run(ctx)
+	case "token":
+		err = token()
 	}
 	if err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, context.Canceled) {
 		panic(err)
@@ -107,15 +120,36 @@ func run(global context.Context) error {
 	return runWebhook(global, webhook)
 }
 
+func token() error {
+	now := time.Now()
+	claims := jwt.RegisteredClaims{
+		Issuer:   "wd",
+		Subject:  config.Token.Name,
+		Audience: config.Token.Args.Hooks,
+		IssuedAt: jwt.NewNumericDate(now),
+	}
+
+	if config.Token.Expiration > 0 {
+		claims.ExpiresAt = jwt.NewNumericDate(now.Add(config.Token.Expiration))
+	}
+
+	tokenString, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(config.Secret))
+	if err != nil {
+		return err
+	}
+	fmt.Println(tokenString)
+	return nil
+}
+
 func runWebhook(global context.Context, webhook *wd.Webhook) error {
 	mux := http.NewServeMux()
 	if !config.DisableMetrics {
 		mux.Handle("/metrics", promhttp.Handler())
 	}
-	if len(config.Tokens) == 0 {
+	if len(config.Secret) == 0 {
 		mux.Handle("/", webhook)
 	} else {
-		mux.Handle("/", protected(config.Tokens, webhook))
+		mux.Handle("/", protected(config.Secret, webhook))
 	}
 
 	var handler http.Handler = mux
@@ -152,22 +186,54 @@ func runWebhook(global context.Context, webhook *wd.Webhook) error {
 	}
 }
 
-func protected(tokens []string, handler *wd.Webhook) http.Handler {
-	index := make(map[string]bool, len(tokens))
-	for _, t := range tokens {
-		index[t] = true
-	}
-
+func protected(secret string, handler *wd.Webhook) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		token := request.Header.Get("Authorization")
-		if token == "" {
-			token = request.URL.Query().Get("token")
+		tokenString := request.Header.Get("Authorization")
+		if tokenString == "" {
+			tokenString = request.URL.Query().Get("token")
 		}
-		if !index[token] {
+		parts := strings.Split(tokenString, " ")
+		tokenString = parts[len(parts)-1]
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return []byte(secret), nil
+		})
+		if err != nil {
 			handler.Metrics.RecordForbidden(request.URL.Path)
 			writer.WriteHeader(http.StatusForbidden)
 			return
 		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !token.Valid {
+			handler.Metrics.RecordForbidden(request.URL.Path)
+			writer.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		if allowedAud, ok := claims["aud"].([]string); ok && len(allowedAud) > 0 {
+			requestedAud := strings.Trim(request.URL.Path, "/")
+			allowed := false
+			for _, sub := range allowedAud {
+				if sub == requestedAud {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				handler.Metrics.RecordForbidden(request.URL.Path)
+				writer.WriteHeader(http.StatusForbidden)
+				return
+			}
+		}
+
+		if sub, ok := claims["sub"].(string); ok {
+			log.Println("authorized request from", sub)
+			request.Header.Set("X-Subject", sub)
+		}
+
 		handler.ServeHTTP(writer, request)
 	})
 }

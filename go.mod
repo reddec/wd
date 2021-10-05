@@ -3,6 +3,7 @@ module github.com/reddec/wd
 go 1.17
 
 require (
+	github.com/golang-jwt/jwt/v4 v4.1.0
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/prometheus/client_golang v1.11.0
 	github.com/rs/cors v1.8.0

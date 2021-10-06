@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -12,6 +13,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/reddec/wd/internal"
 )
 
 // Webhook handler - matches request path as script path in ScriptsDir.
@@ -22,12 +25,13 @@ import (
 //      QUERY_PAGE
 //
 type Webhook struct {
-	TempDir    bool          // create new temp work dir for each request inside main WorkDir
-	WorkDir    string        // location for scripts work dir. Acts as parent dir in case TempDir enabled. Also, in case TempDir enabled and WorkDir is empty - default system temp dir will be used
-	Timeout    time.Duration // execution timeout. Zero or negative means no time limit
-	BufferSize int           // buffer response before reply. Zero means no buffering. It's soft limit.
-	Metrics    *Metrics      // optional metrics for prometheus
-	Runner     Runner        // what to run
+	RunAsFileOwner bool          // (posix only) run as user and group same as defined on file (first argument) (ie: gid, uid), must be run as root.
+	TempDir        bool          // create new temp work dir for each request inside main WorkDir
+	WorkDir        string        // location for scripts work dir. Acts as parent dir in case TempDir enabled. Also, in case TempDir enabled and WorkDir is empty - default system temp dir will be used
+	Timeout        time.Duration // execution timeout. Zero or negative means no time limit
+	BufferSize     int           // buffer response before reply. Zero means no buffering. It's soft limit.
+	Metrics        *Metrics      // optional metrics for prometheus
+	Runner         Runner        // what to run
 }
 
 func (wh *Webhook) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
@@ -63,8 +67,11 @@ func (wh *Webhook) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 	}
 
 	// create temp dir
-	workDir, err := wh.tempDir()
-	if err != nil {
+	workDir, err := wh.tempDir(command[0])
+	if errors.Is(err, os.ErrNotExist) {
+		http.NotFound(writer, req)
+		return
+	} else if err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
 		log.Println("failed to create temp dir:", err)
 		return
@@ -84,6 +91,12 @@ func (wh *Webhook) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 		cmd.Env = append(cmd.Env, "QUERY_"+toEnv(k)+"="+strings.Join(v, ","))
 	}
 	cmd.Env = append(cmd.Env, "REQUEST_PATH="+req.URL.Path, "REQUEST_METHOD="+req.Method)
+
+	if err := wh.setRunCredentials(cmd, command[0]); err != nil {
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		log.Println("failed set credentials based on file:", err)
+		return
+	}
 
 	err = cmd.Run()
 	if err == nil {
@@ -108,11 +121,22 @@ func (wh *Webhook) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 
 }
 
-func (wh *Webhook) tempDir() (string, error) {
+func (wh *Webhook) tempDir(script string) (string, error) {
 	if !wh.TempDir {
 		return wh.WorkDir, nil
 	}
-	return ioutil.TempDir(wh.WorkDir, "")
+	tmpDir, err := ioutil.TempDir(wh.WorkDir, "")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	if !wh.RunAsFileOwner {
+		return tmpDir, nil
+	}
+	if err := internal.ChownAsFile(tmpDir, script); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return "", fmt.Errorf("chown temp dir %s based on uid/gid from %s: %w", tmpDir, script, err)
+	}
+	return tmpDir, nil
 }
 
 func (wh *Webhook) cleanupTempDir(dir string) error {
@@ -120,6 +144,13 @@ func (wh *Webhook) cleanupTempDir(dir string) error {
 		return nil
 	}
 	return os.RemoveAll(dir)
+}
+
+func (wh *Webhook) setRunCredentials(cmd *exec.Cmd, script string) error {
+	if !wh.RunAsFileOwner {
+		return nil
+	}
+	return internal.SetCreds(cmd, script)
 }
 
 func toEnv(name string) string {

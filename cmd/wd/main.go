@@ -40,6 +40,7 @@ type Config struct {
 }
 
 type CmdServe struct {
+	RunAsScriptOwner bool   `short:"R" long:"run-as-script-owner" env:"RUN_AS_SCRIPT_OWNER" description:"Run scripts from the same Gid/Uid as file. If isolation enabled, temp dir will be also chown. Requires root"`
 	WorkDir          string `short:"w" long:"work-dir" env:"WORK_DIR" description:"Working directory"`
 	DisableIsolation bool   `short:"I" long:"disable-isolation" env:"DISABLE_ISOLATION" description:"Disable isolated work dirs"`
 	EnableDotFiles   bool   `short:"D" long:"enable-dot-files" env:"ENABLE_DOT_FILES" description:"Enable lookup for scripts in dor directories and files"`
@@ -94,11 +95,12 @@ func serve(global context.Context) error {
 	}
 	metrics := wd.NewDefaultMetrics()
 	webhook := &wd.Webhook{
-		TempDir:    !config.Serve.DisableIsolation,
-		WorkDir:    config.Serve.WorkDir,
-		Timeout:    config.Timeout,
-		BufferSize: config.Buffer,
-		Metrics:    metrics,
+		TempDir:        !config.Serve.DisableIsolation,
+		WorkDir:        config.Serve.WorkDir,
+		Timeout:        config.Timeout,
+		BufferSize:     config.Buffer,
+		Metrics:        metrics,
+		RunAsFileOwner: config.Serve.RunAsScriptOwner,
 		Runner: &wd.DirectoryRunner{
 			AllowDotFiles: config.Serve.EnableDotFiles,
 			ScriptsDir:    rootPath,
@@ -110,12 +112,13 @@ func serve(global context.Context) error {
 func run(global context.Context) error {
 	metrics := wd.NewDefaultMetrics()
 	webhook := &wd.Webhook{
-		TempDir:    false,
-		WorkDir:    ".",
-		Timeout:    config.Timeout,
-		BufferSize: config.Buffer,
-		Metrics:    metrics,
-		Runner:     wd.StaticScript(config.Run.Args.Binary, config.Run.Args.Args),
+		TempDir:        false,
+		WorkDir:        ".",
+		Timeout:        config.Timeout,
+		BufferSize:     config.Buffer,
+		Metrics:        metrics,
+		RunAsFileOwner: false,
+		Runner:         wd.StaticScript(config.Run.Args.Binary, config.Run.Args.Args),
 	}
 	return runWebhook(global, webhook)
 }

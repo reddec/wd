@@ -16,11 +16,14 @@ Supports:
     * scripts from directory (ex: `wd serve path/to/dir`)
     * single script from command line (ex: `wd run date`)
 
+
 ## Installation
 
 From binaries and packages - [releases page](https://github.com/reddec/wd/releases)
 
-From brew for MacOs (Intel and Apple Silicon) - `brew install reddec/tap/wd`
+From brew for MacOS (Intel and Apple Silicon) - `brew install reddec/tap/wd`
+
+From source `go install github.com/reddec/wd@latest`
 
 ## Usage
 

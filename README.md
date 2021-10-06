@@ -18,7 +18,6 @@ Supports:
 * Designed to work in memory-constrained environments
 * Supports async mode
 
-
 ## Installation
 
 From binaries and packages - [releases page](https://github.com/reddec/wd/releases)
@@ -33,29 +32,29 @@ show current date
 
     wd run date
 
-
-expose current dir 
+expose current dir
 
     wd serve .
-
-
 
 ## Usage
 
 ### Metrics
 
-
 By-default, `wd` exposes metrics endpoint as `/metrics` without restrictions. You may:
+
 * disable metrics completely by `M, --disable-metrics`
-* put metrics endpoint behind tokens (requires `-s ...`) by `--secure-metrics`. Tokens should be issued for `metrics` action.
+* put metrics endpoint behind tokens (requires `-s ...`) by `--secure-metrics`. Tokens should be issued for `metrics`
+  action.
 
 ### Async execution
 
 In case of asynchronous execution:
+
 1. request will be dumped to a temporary file on disk
 2. client will get 204 No Content
 3. in background go-routine, request will be streamed from disk like it was sent by client
-4. it will retry execute request again and again during 1 + `--retries` attempts in case non-2xx code returned. Output will be dropped.
+4. it will retry execute request again and again during 1 + `--retries` attempts in case non-2xx code returned. Output
+   will be dropped.
 
 Async mode can be activated by:
 
@@ -64,9 +63,8 @@ Async mode can be activated by:
 
 to disable async execution completely use flag `--async disabled`
 
-
-During async execution the special env variable `HEADER_X_ATTEMPT` will be passed to the script. It contains attempt number
-starting from 1.
+During async execution the special env variable `HEADER_X_ATTEMPT` will be passed to the script. It contains attempt
+number starting from 1.
 
 ### Common
 
@@ -113,6 +111,7 @@ Application Options:
   -a, --async=[auto|forced|disabled] Async mode. auto - relies on async param in query, forced - always async, disabled - no async (default: auto) [$ASYNC]
   -r, --retries=                     Number of additional retries after first attempt (async only) (default: 3) [$RETRIES]
   -d, --delay=                       Delay between attempts (async only) (default: 3s) [$DELAY]
+  -W, --workers=                     Maximum number of workers. Default is 2 x num CPU [$WORKERS]
   -M, --disable-metrics              Disable prometheus metrics [$DISABLE_METRICS]
       --secure-metrics               Require token to access metrics endpoint [$SECURE_METRICS]
       --auto-tls=                    Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
@@ -146,9 +145,8 @@ Map request path to script inside directory. It's forbidden to execute scripts o
 directory and scripts with leading .dot disabled.
 
 To be more secure, you may run `wd` as root and add flag `-R, --run-as-script-owner` (works only on posix). In that case
-`wd` will run script with same uid/gid as in file. 
-Basically, if you want to run script as specific user - just do `chown` on it.
-If isolation not disabled, temporary work directory also will be chown to the script uid/gid.
+`wd` will run script with same uid/gid as in file. Basically, if you want to run script as specific user - just
+do `chown` on it. If isolation not disabled, temporary work directory also will be chown to the script uid/gid.
 
 ```
 Usage:
@@ -163,6 +161,7 @@ Application Options:
   -a, --async=[auto|forced|disabled] Async mode. auto - relies on async param in query, forced - always async, disabled - no async (default: auto) [$ASYNC]
   -r, --retries=                     Number of additional retries after first attempt (async only) (default: 3) [$RETRIES]
   -d, --delay=                       Delay between attempts (async only) (default: 3s) [$DELAY]
+  -W, --workers=                     Maximum number of workers. Default is 2 x num CPU [$WORKERS]
   -M, --disable-metrics              Disable prometheus metrics [$DISABLE_METRICS]
       --secure-metrics               Require token to access metrics endpoint [$SECURE_METRICS]
       --auto-tls=                    Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
@@ -233,11 +232,10 @@ Help Options:
 
 All hooks are allowed. Response can be used as content of `Authorization` header or query parameter `token`.
 
-
 **named token**
 
     wd -s secret1 token -n token-name
-   
+
 **token with expiration**
 
     wd -s secret1 token -e 12h

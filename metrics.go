@@ -17,6 +17,7 @@ type Metrics struct {
 	output        *prometheus.CounterVec
 	executionTime *prometheus.CounterVec
 	timing        *prometheus.HistogramVec
+	busyWorkers   prometheus.Gauge
 }
 
 func NewDefaultMetrics() *Metrics {
@@ -64,7 +65,19 @@ func NewMetrics(registry prometheus.Registerer) *Metrics {
 			Help:      "execution time distribution",
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"path"}),
+		busyWorkers: factory.NewGauge(prometheus.GaugeOpts{
+			Namespace: "webhooks",
+			Name:      "busy_workers",
+			Help:      "number of busy workers",
+		}),
 	}
+}
+
+func (m *Metrics) AddBusyWorker(inc int64) {
+	if m == nil {
+		return
+	}
+	m.busyWorkers.Add(float64(inc))
 }
 
 func (m *Metrics) countResult(req *http.Request, br *bufferedResponse, input *meteredStream) {

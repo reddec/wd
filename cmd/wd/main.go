@@ -24,7 +24,6 @@ type Config struct {
 	Serve CmdServe `command:"serve" description:"serve server from directory"`
 	Run   CmdRun   `command:"run" description:"run single script"`
 	Token CmdToken `command:"token" description:"issue token"`
-	//TODO: limit number of async processing
 	//TODO: assign request ID
 	CORS           bool          `long:"cors" env:"CORS" description:"Enable CORS"`
 	Bind           string        `short:"b" long:"bind" env:"BIND" description:"Binding address" default:"127.0.0.1:8080"`
@@ -34,6 +33,7 @@ type Config struct {
 	Async          string        `short:"a" long:"async" env:"ASYNC" description:"Async mode. auto - relies on async param in query, forced - always async, disabled - no async" default:"auto" choice:"auto" choice:"forced" choice:"disabled"`
 	Retries        int           `short:"r" long:"retries" env:"RETRIES" description:"Number of additional retries after first attempt (async only)" default:"3"`
 	Delay          time.Duration `short:"d" long:"delay" env:"DELAY" description:"Delay between attempts (async only)" default:"3s"`
+	Workers        int64         `short:"W" long:"workers" env:"WORKERS" description:"Maximum number of workers. Default is 2 x num CPU"`
 	DisableMetrics bool          `short:"M" long:"disable-metrics" env:"DISABLE_METRICS" description:"Disable prometheus metrics"`
 	SecureMetrics  bool          `long:"secure-metrics" env:"SECURE_METRICS" description:"Require token to access metrics endpoint"`
 	// TLS
@@ -99,7 +99,7 @@ func serve(global context.Context) error {
 		return fmt.Errorf("detect scripts path: %w", err)
 	}
 	metrics := wd.NewDefaultMetrics()
-	webhook := &wd.Webhook{
+	webhook := wd.New(wd.Config{
 		Async:          config.asyncMode(),
 		Delay:          config.Delay,
 		Retries:        config.Retries,
@@ -108,18 +108,19 @@ func serve(global context.Context) error {
 		Timeout:        config.Timeout,
 		BufferSize:     config.Buffer,
 		Metrics:        metrics,
+		Workers:        config.Workers,
 		RunAsFileOwner: config.Serve.RunAsScriptOwner,
 		Runner: &wd.DirectoryRunner{
 			AllowDotFiles: config.Serve.EnableDotFiles,
 			ScriptsDir:    rootPath,
 		},
-	}
-	return runWebhook(global, webhook)
+	})
+	return runWebhook(global, webhook, metrics)
 }
 
 func run(global context.Context) error {
 	metrics := wd.NewDefaultMetrics()
-	webhook := &wd.Webhook{
+	webhook := wd.New(wd.Config{
 		Async:          config.asyncMode(),
 		Delay:          config.Delay,
 		Retries:        config.Retries,
@@ -128,10 +129,11 @@ func run(global context.Context) error {
 		Timeout:        config.Timeout,
 		BufferSize:     config.Buffer,
 		Metrics:        metrics,
+		Workers:        config.Workers,
 		RunAsFileOwner: false,
 		Runner:         wd.StaticScript(config.Run.Args.Binary, config.Run.Args.Args...),
-	}
-	return runWebhook(global, webhook)
+	})
+	return runWebhook(global, webhook, metrics)
 }
 
 func token() error {
@@ -155,19 +157,19 @@ func token() error {
 	return nil
 }
 
-func runWebhook(global context.Context, webhook *wd.Webhook) error {
+func runWebhook(global context.Context, webhook http.Handler, metrics *wd.Metrics) error {
 	mux := http.NewServeMux()
 	if !config.DisableMetrics {
 		var metricsHandler = promhttp.Handler()
 		if config.SecureMetrics {
-			metricsHandler = protected(config.Secret, metricsHandler, webhook)
+			metricsHandler = protected(config.Secret, metricsHandler, metrics)
 		}
 		mux.Handle("/metrics", metricsHandler)
 	}
 	if len(config.Secret) == 0 {
 		mux.Handle("/", webhook)
 	} else {
-		mux.Handle("/", protected(config.Secret, webhook, webhook))
+		mux.Handle("/", protected(config.Secret, webhook, metrics))
 	}
 
 	var handler http.Handler = mux
@@ -204,7 +206,7 @@ func runWebhook(global context.Context, webhook *wd.Webhook) error {
 	}
 }
 
-func protected(secret string, handler http.Handler, webhook *wd.Webhook) http.Handler {
+func protected(secret string, handler http.Handler, metrics *wd.Metrics) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		tokenString := request.Header.Get("Authorization")
 		if tokenString == "" {
@@ -219,14 +221,14 @@ func protected(secret string, handler http.Handler, webhook *wd.Webhook) http.Ha
 			return []byte(secret), nil
 		})
 		if err != nil {
-			webhook.Metrics.RecordForbidden(request.URL.Path)
+			metrics.RecordForbidden(request.URL.Path)
 			writer.WriteHeader(http.StatusForbidden)
 			return
 		}
 
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok || !token.Valid {
-			webhook.Metrics.RecordForbidden(request.URL.Path)
+			metrics.RecordForbidden(request.URL.Path)
 			writer.WriteHeader(http.StatusForbidden)
 			return
 		}
@@ -241,7 +243,7 @@ func protected(secret string, handler http.Handler, webhook *wd.Webhook) http.Ha
 				}
 			}
 			if !allowed {
-				webhook.Metrics.RecordForbidden(request.URL.Path)
+				metrics.RecordForbidden(request.URL.Path)
 				writer.WriteHeader(http.StatusForbidden)
 				return
 			}

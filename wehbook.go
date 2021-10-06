@@ -12,11 +12,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/reddec/wd/internal"
+	"golang.org/x/sync/semaphore"
 )
 
 var ErrAttemptFailed = errors.New("attempt failed - non 2xx code returned")
@@ -34,15 +36,8 @@ const (
 	AsyncModeDisabled
 )
 
-// Webhook handler - matches request path as script path in ScriptsDir.
-// Converts headers to HEADER_<capital snake case> environment, converts query params to QUERY_<capital snake case>
-// environment variables.
-//
-//      HEADER_CONTENT_TYPE
-//      QUERY_PAGE
-//
-// Special header HEADER_X_ATTEMPT will be added in case of async processing. Attempt is number, starting from 1.
-type Webhook struct {
+// Config for webhook daemon. All fields except Runner are completely optional.
+type Config struct {
 	RunAsFileOwner bool          // (posix only) run as user and group same as defined on file (first argument) (ie: gid, uid), must be run as root.
 	TempDir        bool          // create new temp work dir for each request inside main WorkDir
 	WorkDir        string        // location for scripts work dir. Acts as parent dir in case TempDir enabled. Also, in case TempDir enabled and WorkDir is empty - default system temp dir will be used
@@ -52,12 +47,56 @@ type Webhook struct {
 	Async          AsyncMode     // cache request into temp, returns 204 and process request in background
 	Retries        int           // (async only) number of additional retries after first attempt in case of async processing
 	Delay          time.Duration // (async only) delay between retries for async processing. If delay is less or equal to 0, DefaultDelay will be used
+	Workers        int64         // total maximum amount of workers (including async). If <= 0, 2 * NumCPU used
 	Runner         Runner        // what to run
 }
 
-func (wh *Webhook) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
+// New webhook daemon based on config. Fills all default variables and initializes internal state.
+//
+// Webhook handler - matches request path as script path in ScriptsDir.
+// Converts headers to HEADER_<capital snake case> environment, converts query params to QUERY_<capital snake case>
+// environment variables.
+//
+//      HEADER_CONTENT_TYPE
+//      QUERY_PAGE
+//
+// Special header HEADER_X_ATTEMPT will be added in case of async processing. Attempt is number, starting from 1.
+//
+// It will panic in case Runner is not defined.
+func New(config Config) http.Handler {
+	if config.Delay <= 0 {
+		config.Delay = DefaultDelay
+	}
+	if config.Workers <= 0 {
+		config.Workers = int64(2 * runtime.NumCPU())
+	}
+	if config.Runner == nil {
+		panic("runner not defined")
+	}
+	return &webhookDaemon{
+		Config: config,
+		pool:   semaphore.NewWeighted(config.Workers),
+	}
+}
+
+type webhookDaemon struct {
+	Config
+	pool *semaphore.Weighted
+}
+
+func (wh *webhookDaemon) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+	if err := wh.pool.Acquire(ctx, 1); err != nil {
+		log.Println("failed get available worker:", err)
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	wh.Metrics.AddBusyWorker(1)
+
 	if !wh.isAsyncRequest(req) {
 		wh.processRequest(writer, req)
+		wh.pool.Release(1)
+		wh.Metrics.AddBusyWorker(-1)
 		return
 	}
 	tmpFile, err := ioutil.TempFile("", "")
@@ -74,18 +113,16 @@ func (wh *Webhook) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 	}
 
 	writer.WriteHeader(http.StatusNoContent)
-	go wh.processRequestAsync(tmpFile)
+	go func() {
+		wh.processRequestAsync(tmpFile)
+		_ = tmpFile.Close()
+		_ = os.RemoveAll(tmpFile.Name())
+		wh.pool.Release(1)
+		wh.Metrics.AddBusyWorker(-1)
+	}()
 }
 
-func (wh *Webhook) processRequestAsync(tmpFile *os.File) {
-	defer os.RemoveAll(tmpFile.Name())
-	defer tmpFile.Close()
-
-	delay := wh.Delay
-	if delay <= 0 {
-		delay = DefaultDelay
-	}
-
+func (wh *webhookDaemon) processRequestAsync(tmpFile *os.File) {
 	for i := 0; i <= wh.Retries; i++ {
 		err := wh.processRequestAsyncAttempt(tmpFile, i)
 		if err == nil {
@@ -94,13 +131,13 @@ func (wh *Webhook) processRequestAsync(tmpFile *os.File) {
 		}
 		log.Println(i+1, "/", wh.Retries+1, "failed to process async request:", err)
 		if i < wh.Retries {
-			time.Sleep(delay)
+			time.Sleep(wh.Delay)
 		}
 	}
 	log.Println("async processing failed after all attempts")
 }
 
-func (wh *Webhook) processRequestAsyncAttempt(tmpFile *os.File, attempt int) error {
+func (wh *webhookDaemon) processRequestAsyncAttempt(tmpFile *os.File, attempt int) error {
 	if _, err := tmpFile.Seek(0, 0); err != nil {
 		return fmt.Errorf("reset temp file: %w", err)
 	}
@@ -121,7 +158,7 @@ func (wh *Webhook) processRequestAsyncAttempt(tmpFile *os.File, attempt int) err
 	return ErrAttemptFailed
 }
 
-func (wh *Webhook) processRequest(writer http.ResponseWriter, req *http.Request) {
+func (wh *webhookDaemon) processRequest(writer http.ResponseWriter, req *http.Request) {
 	defer req.Body.Close()
 
 	// count input size
@@ -208,7 +245,7 @@ func (wh *Webhook) processRequest(writer http.ResponseWriter, req *http.Request)
 
 }
 
-func (wh *Webhook) tempDir(script string) (string, error) {
+func (wh *webhookDaemon) tempDir(script string) (string, error) {
 	if !wh.TempDir {
 		return wh.WorkDir, nil
 	}
@@ -226,21 +263,21 @@ func (wh *Webhook) tempDir(script string) (string, error) {
 	return tmpDir, nil
 }
 
-func (wh *Webhook) cleanupTempDir(dir string) error {
+func (wh *webhookDaemon) cleanupTempDir(dir string) error {
 	if !wh.TempDir {
 		return nil
 	}
 	return os.RemoveAll(dir)
 }
 
-func (wh *Webhook) setRunCredentials(cmd *exec.Cmd, script string) error {
+func (wh *webhookDaemon) setRunCredentials(cmd *exec.Cmd, script string) error {
 	if !wh.RunAsFileOwner {
 		return nil
 	}
 	return internal.SetCreds(cmd, script)
 }
 
-func (wh *Webhook) isAsyncRequest(req *http.Request) bool {
+func (wh *webhookDaemon) isAsyncRequest(req *http.Request) bool {
 	switch wh.Async {
 	case AsyncModeDisabled:
 		return false

@@ -79,6 +79,7 @@ func (wh *Webhook) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 
 func (wh *Webhook) processRequestAsync(tmpFile *os.File) {
 	defer os.RemoveAll(tmpFile.Name())
+	defer tmpFile.Close()
 
 	delay := wh.Delay
 	if delay <= 0 {

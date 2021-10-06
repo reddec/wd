@@ -24,12 +24,16 @@ type Config struct {
 	Serve CmdServe `command:"serve" description:"serve server from directory"`
 	Run   CmdRun   `command:"run" description:"run single script"`
 	Token CmdToken `command:"token" description:"issue token"`
-
+	//TODO: limit number of async processing
+	//TODO: assign request ID
 	CORS           bool          `long:"cors" env:"CORS" description:"Enable CORS"`
 	Bind           string        `short:"b" long:"bind" env:"BIND" description:"Binding address" default:"127.0.0.1:8080"`
 	Timeout        time.Duration `short:"t" long:"timeout" env:"TIMEOUT" description:"Maximum execution timeout" default:"120s"`
 	Secret         string        `short:"s" long:"secret" env:"SECRET" description:"JWT secret for checking tokens. Use token command to create token"`
 	Buffer         int           `short:"B" long:"buffer" env:"BUFFER" description:"Buffer response size" default:"8192"`
+	Async          string        `short:"a" long:"async" env:"ASYNC" description:"Async mode. auto - relies on async param in query, forced - always async, disabled - no async" default:"auto" choice:"auto" choice:"forced" choice:"disabled"`
+	Retries        int           `short:"r" long:"retries" env:"RETRIES" description:"Number of additional retries after first attempt (async only)" default:"3"`
+	Delay          time.Duration `short:"d" long:"delay" env:"DELAY" description:"Delay between attempts (async only)" default:"3s"`
 	DisableMetrics bool          `short:"M" long:"disable-metrics" env:"DISABLE_METRICS" description:"Disable prometheus metrics"`
 	SecureMetrics  bool          `long:"secure-metrics" env:"SECURE_METRICS" description:"Require token to access metrics endpoint"`
 	// TLS
@@ -96,6 +100,9 @@ func serve(global context.Context) error {
 	}
 	metrics := wd.NewDefaultMetrics()
 	webhook := &wd.Webhook{
+		Async:          config.asyncMode(),
+		Delay:          config.Delay,
+		Retries:        config.Retries,
 		TempDir:        !config.Serve.DisableIsolation,
 		WorkDir:        config.Serve.WorkDir,
 		Timeout:        config.Timeout,
@@ -113,13 +120,16 @@ func serve(global context.Context) error {
 func run(global context.Context) error {
 	metrics := wd.NewDefaultMetrics()
 	webhook := &wd.Webhook{
+		Async:          config.asyncMode(),
+		Delay:          config.Delay,
+		Retries:        config.Retries,
 		TempDir:        false,
 		WorkDir:        ".",
 		Timeout:        config.Timeout,
 		BufferSize:     config.Buffer,
 		Metrics:        metrics,
 		RunAsFileOwner: false,
-		Runner:         wd.StaticScript(config.Run.Args.Binary, config.Run.Args.Args),
+		Runner:         wd.StaticScript(config.Run.Args.Binary, config.Run.Args.Args...),
 	}
 	return runWebhook(global, webhook)
 }
@@ -244,4 +254,17 @@ func protected(secret string, handler http.Handler, webhook *wd.Webhook) http.Ha
 
 		handler.ServeHTTP(writer, request)
 	})
+}
+
+func (cfg Config) asyncMode() wd.AsyncMode {
+	switch cfg.Async {
+	case "forced":
+		return wd.AsyncModeForced
+	case "disabled":
+		return wd.AsyncModeDisabled
+	case "auto":
+		fallthrough
+	default:
+		return wd.AsyncModeAuto
+	}
 }

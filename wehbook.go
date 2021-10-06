@@ -1,6 +1,7 @@
 package wd
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -11,19 +12,36 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/reddec/wd/internal"
 )
 
+var ErrAttemptFailed = errors.New("attempt failed - non 2xx code returned")
+
+const DefaultDelay = 3 * time.Second
+
+type AsyncMode byte
+
+const (
+	// AsyncModeAuto enables async processing mode if there is 'async=(1|y|yes|true|ok|on)' in query
+	AsyncModeAuto AsyncMode = iota
+	// AsyncModeForced enables async processing mode regardless of anything
+	AsyncModeForced
+	// AsyncModeDisabled disables async processing
+	AsyncModeDisabled
+)
+
 // Webhook handler - matches request path as script path in ScriptsDir.
 // Converts headers to HEADER_<capital snake case> environment, converts query params to QUERY_<capital snake case>
 // environment variables.
 //
-//      HTTP_CONTENT_TYPE
+//      HEADER_CONTENT_TYPE
 //      QUERY_PAGE
 //
+// Special header HEADER_X_ATTEMPT will be added in case of async processing. Attempt is number, starting from 1.
 type Webhook struct {
 	RunAsFileOwner bool          // (posix only) run as user and group same as defined on file (first argument) (ie: gid, uid), must be run as root.
 	TempDir        bool          // create new temp work dir for each request inside main WorkDir
@@ -31,10 +49,78 @@ type Webhook struct {
 	Timeout        time.Duration // execution timeout. Zero or negative means no time limit
 	BufferSize     int           // buffer response before reply. Zero means no buffering. It's soft limit.
 	Metrics        *Metrics      // optional metrics for prometheus
+	Async          AsyncMode     // cache request into temp, returns 204 and process request in background
+	Retries        int           // (async only) number of additional retries after first attempt in case of async processing
+	Delay          time.Duration // (async only) delay between retries for async processing. If delay is less or equal to 0, DefaultDelay will be used
 	Runner         Runner        // what to run
 }
 
 func (wh *Webhook) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
+	if !wh.isAsyncRequest(req) {
+		wh.processRequest(writer, req)
+		return
+	}
+	tmpFile, err := ioutil.TempFile("", "")
+	if err != nil {
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		log.Println("failed to create temp file:", err)
+		return
+	}
+
+	if err := req.Write(tmpFile); err != nil {
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		log.Println("failed to save request to temp file:", err)
+		return
+	}
+
+	writer.WriteHeader(http.StatusNoContent)
+	go wh.processRequestAsync(tmpFile)
+}
+
+func (wh *Webhook) processRequestAsync(tmpFile *os.File) {
+	defer os.RemoveAll(tmpFile.Name())
+
+	delay := wh.Delay
+	if delay <= 0 {
+		delay = DefaultDelay
+	}
+
+	for i := 0; i <= wh.Retries; i++ {
+		err := wh.processRequestAsyncAttempt(tmpFile, i)
+		if err == nil {
+			log.Println(i+1, "/", wh.Retries+1, "successfully processed async request")
+			return
+		}
+		log.Println(i+1, "/", wh.Retries+1, "failed to process async request:", err)
+		if i < wh.Retries {
+			time.Sleep(delay)
+		}
+	}
+	log.Println("async processing failed after all attempts")
+}
+
+func (wh *Webhook) processRequestAsyncAttempt(tmpFile *os.File, attempt int) error {
+	if _, err := tmpFile.Seek(0, 0); err != nil {
+		return fmt.Errorf("reset temp file: %w", err)
+	}
+
+	reader := bufio.NewReader(tmpFile)
+	req, err := http.ReadRequest(reader)
+	if err != nil {
+		return fmt.Errorf("read request from temp file: %w", err)
+	}
+	req.Header.Set("X-Attempt", strconv.Itoa(attempt+1))
+
+	res := &nopWriter{}
+	wh.processRequest(res, req)
+	if res.status == 0 || res.status/100 == 2 {
+		return nil
+	}
+
+	return ErrAttemptFailed
+}
+
+func (wh *Webhook) processRequest(writer http.ResponseWriter, req *http.Request) {
 	defer req.Body.Close()
 
 	// count input size
@@ -153,6 +239,19 @@ func (wh *Webhook) setRunCredentials(cmd *exec.Cmd, script string) error {
 	return internal.SetCreds(cmd, script)
 }
 
+func (wh *Webhook) isAsyncRequest(req *http.Request) bool {
+	switch wh.Async {
+	case AsyncModeDisabled:
+		return false
+	case AsyncModeForced:
+		return true
+	case AsyncModeAuto:
+		fallthrough
+	default:
+		return parseBool(req.URL.Query().Get("async"))
+	}
+}
+
 func toEnv(name string) string {
 	return strings.ReplaceAll(strings.ToUpper(name), "-", "_")
 }
@@ -221,4 +320,33 @@ func (ms *meteredStream) Read(p []byte) (n int, err error) {
 
 func (ms *meteredStream) Close() error {
 	return ms.source.Close()
+}
+
+type nopWriter struct {
+	status  int
+	headers http.Header
+}
+
+func (nw *nopWriter) Header() http.Header {
+	if nw.headers == nil {
+		nw.headers = make(http.Header)
+	}
+	return nw.headers
+}
+
+func (nw *nopWriter) Write(i []byte) (int, error) {
+	return len(i), nil
+}
+
+func (nw *nopWriter) WriteHeader(statusCode int) {
+	nw.status = statusCode
+}
+
+func parseBool(value string) bool {
+	switch strings.ToLower(value) {
+	case "t", "1", "on", "ok", "true", "yes":
+		return true
+	default:
+		return false
+	}
 }

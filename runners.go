@@ -18,7 +18,7 @@ func (r RunnerFunc) Command(req *http.Request) []string {
 	return r(req)
 }
 
-func StaticScript(command string, args []string) RunnerFunc {
+func StaticScript(command string, args ...string) RunnerFunc {
 	cli := append([]string{command}, args...)
 	return RunnerFunc(func(req *http.Request) []string {
 		return cli

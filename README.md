@@ -24,6 +24,10 @@ From brew for MacOs (Intel and Apple Silicon) - `brew install reddec/tap/wd`
 
 ## Usage
 
+By-default, `wd` exposes metrics endpoint as `/metrics` without restrictions. You may:
+* disable metrics completely by `M, --disable-metrics`
+* put metrics endpoint behind tokens (requires `-s ...`) by `--secure-metrics`. Tokens should be issued for `metrics` action.
+
 ### Common
 
 ```
@@ -113,6 +117,7 @@ Application Options:
   -s, --secret=                  JWT secret for checking tokens. Use token command to create token [$SECRET]
   -B, --buffer=                  Buffer response size (default: 8192) [$BUFFER]
   -M, --disable-metrics          Disable prometheus metrics [$DISABLE_METRICS]
+      --secure-metrics           Require token to access metrics endpoint [$SECURE_METRICS]
       --auto-tls=                Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
       --auto-tls-cache-dir=      Location where to store certificates (default: .certs) [$AUTO_TLS_CACHE_DIR]
       --tls                      Enable HTTPS serving with TLS. Ignored with --auto-tls' [$TLS]
@@ -157,6 +162,7 @@ Application Options:
   -s, --secret=             JWT secret for checking tokens. Use token command to create token [$SECRET]
   -B, --buffer=             Buffer response size (default: 8192) [$BUFFER]
   -M, --disable-metrics     Disable prometheus metrics [$DISABLE_METRICS]
+      --secure-metrics      Require token to access metrics endpoint [$SECURE_METRICS]
       --auto-tls=           Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
       --auto-tls-cache-dir= Location where to store certificates (default: .certs) [$AUTO_TLS_CACHE_DIR]
       --tls                 Enable HTTPS serving with TLS. Ignored with --auto-tls' [$TLS]

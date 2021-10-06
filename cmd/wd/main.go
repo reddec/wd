@@ -31,6 +31,7 @@ type Config struct {
 	Secret         string        `short:"s" long:"secret" env:"SECRET" description:"JWT secret for checking tokens. Use token command to create token"`
 	Buffer         int           `short:"B" long:"buffer" env:"BUFFER" description:"Buffer response size" default:"8192"`
 	DisableMetrics bool          `short:"M" long:"disable-metrics" env:"DISABLE_METRICS" description:"Disable prometheus metrics"`
+	SecureMetrics  bool          `long:"secure-metrics" env:"SECURE_METRICS" description:"Require token to access metrics endpoint"`
 	// TLS
 	AutoTLS         []string `long:"auto-tls" env:"AUTO_TLS" description:"Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls"`
 	AutoTLSCacheDir string   `long:"auto-tls-cache-dir" env:"AUTO_TLS_CACHE_DIR" description:"Location where to store certificates" default:".certs"`
@@ -147,12 +148,16 @@ func token() error {
 func runWebhook(global context.Context, webhook *wd.Webhook) error {
 	mux := http.NewServeMux()
 	if !config.DisableMetrics {
-		mux.Handle("/metrics", promhttp.Handler())
+		var metricsHandler = promhttp.Handler()
+		if config.SecureMetrics {
+			metricsHandler = protected(config.Secret, metricsHandler, webhook)
+		}
+		mux.Handle("/metrics", metricsHandler)
 	}
 	if len(config.Secret) == 0 {
 		mux.Handle("/", webhook)
 	} else {
-		mux.Handle("/", protected(config.Secret, webhook))
+		mux.Handle("/", protected(config.Secret, webhook, webhook))
 	}
 
 	var handler http.Handler = mux
@@ -189,7 +194,7 @@ func runWebhook(global context.Context, webhook *wd.Webhook) error {
 	}
 }
 
-func protected(secret string, handler *wd.Webhook) http.Handler {
+func protected(secret string, handler http.Handler, webhook *wd.Webhook) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		tokenString := request.Header.Get("Authorization")
 		if tokenString == "" {
@@ -204,14 +209,14 @@ func protected(secret string, handler *wd.Webhook) http.Handler {
 			return []byte(secret), nil
 		})
 		if err != nil {
-			handler.Metrics.RecordForbidden(request.URL.Path)
+			webhook.Metrics.RecordForbidden(request.URL.Path)
 			writer.WriteHeader(http.StatusForbidden)
 			return
 		}
 
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok || !token.Valid {
-			handler.Metrics.RecordForbidden(request.URL.Path)
+			webhook.Metrics.RecordForbidden(request.URL.Path)
 			writer.WriteHeader(http.StatusForbidden)
 			return
 		}
@@ -226,7 +231,7 @@ func protected(secret string, handler *wd.Webhook) http.Handler {
 				}
 			}
 			if !allowed {
-				handler.Metrics.RecordForbidden(request.URL.Path)
+				webhook.Metrics.RecordForbidden(request.URL.Path)
 				writer.WriteHeader(http.StatusForbidden)
 				return
 			}

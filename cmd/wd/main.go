@@ -10,10 +10,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/jessevdk/go-flags"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/reddec/wd"
 	"github.com/rs/cors"
@@ -24,16 +26,18 @@ type Config struct {
 	Serve CmdServe `command:"serve" description:"serve server from directory"`
 	Run   CmdRun   `command:"run" description:"run single script"`
 	Token CmdToken `command:"token" description:"issue token"`
-	//TODO: assign request ID
+
 	CORS           bool          `long:"cors" env:"CORS" description:"Enable CORS"`
 	Bind           string        `short:"b" long:"bind" env:"BIND" description:"Binding address" default:"127.0.0.1:8080"`
 	Timeout        time.Duration `short:"t" long:"timeout" env:"TIMEOUT" description:"Maximum execution timeout" default:"120s"`
 	Secret         string        `short:"s" long:"secret" env:"SECRET" description:"JWT secret for checking tokens. Use token command to create token"`
 	Buffer         int           `short:"B" long:"buffer" env:"BUFFER" description:"Buffer response size" default:"8192"`
 	Async          string        `short:"a" long:"async" env:"ASYNC" description:"Async mode. auto - relies on async param in query, forced - always async, disabled - no async" default:"auto" choice:"auto" choice:"forced" choice:"disabled"`
-	Retries        int           `short:"r" long:"retries" env:"RETRIES" description:"Number of additional retries after first attempt (async only)" default:"3"`
+	Retries        uint          `short:"r" long:"retries" env:"RETRIES" description:"Number of additional retries after first attempt (async only)" default:"3"`
 	Delay          time.Duration `short:"d" long:"delay" env:"DELAY" description:"Delay between attempts (async only)" default:"3s"`
-	Workers        int64         `short:"W" long:"workers" env:"WORKERS" description:"Maximum number of workers. Default is 2 x num CPU"`
+	Workers        int64         `short:"W" long:"workers" env:"WORKERS" description:"Maximum number of workers for sync requests. Default is 2 x num CPU"`
+	AsyncWorkers   int           `short:"A" long:"async-workers" env:"ASYNC_WORKERS" description:"Number of workers to process async requests" default:"2"`
+	Queue          int           `short:"q" long:"queue" env:"QUEUE" description:"Queue size for async requests. 0 means unbound" default:"8192"`
 	DisableMetrics bool          `short:"M" long:"disable-metrics" env:"DISABLE_METRICS" description:"Disable prometheus metrics"`
 	SecureMetrics  bool          `long:"secure-metrics" env:"SECURE_METRICS" description:"Require token to access metrics endpoint"`
 	// TLS
@@ -100,20 +104,15 @@ func serve(global context.Context) error {
 	}
 	metrics := wd.NewDefaultMetrics()
 	webhook := wd.New(wd.Config{
-		Async:          config.asyncMode(),
-		Delay:          config.Delay,
-		Retries:        config.Retries,
 		TempDir:        !config.Serve.DisableIsolation,
 		WorkDir:        config.Serve.WorkDir,
 		Timeout:        config.Timeout,
 		BufferSize:     config.Buffer,
 		Metrics:        metrics,
-		Workers:        config.Workers,
 		RunAsFileOwner: config.Serve.RunAsScriptOwner,
-		Runner: &wd.DirectoryRunner{
-			AllowDotFiles: config.Serve.EnableDotFiles,
-			ScriptsDir:    rootPath,
-		},
+	}, &wd.DirectoryRunner{
+		AllowDotFiles: config.Serve.EnableDotFiles,
+		ScriptsDir:    rootPath,
 	})
 	return runWebhook(global, webhook, metrics)
 }
@@ -121,18 +120,13 @@ func serve(global context.Context) error {
 func run(global context.Context) error {
 	metrics := wd.NewDefaultMetrics()
 	webhook := wd.New(wd.Config{
-		Async:          config.asyncMode(),
-		Delay:          config.Delay,
-		Retries:        config.Retries,
 		TempDir:        false,
 		WorkDir:        ".",
 		Timeout:        config.Timeout,
 		BufferSize:     config.Buffer,
 		Metrics:        metrics,
-		Workers:        config.Workers,
 		RunAsFileOwner: false,
-		Runner:         wd.StaticScript(config.Run.Args.Binary, config.Run.Args.Args...),
-	})
+	}, wd.StaticScript(config.Run.Args.Binary, config.Run.Args.Args...))
 	return runWebhook(global, webhook, metrics)
 }
 
@@ -157,7 +151,23 @@ func token() error {
 	return nil
 }
 
-func runWebhook(global context.Context, webhook http.Handler, metrics *wd.Metrics) error {
+func runWebhook(global context.Context, webhookHandler http.Handler, metrics *wd.Metrics) error {
+	var queue wd.Queue
+	if config.Queue > 0 {
+		queue = wd.Limited(config.Queue)
+	} else {
+		queue = wd.Unbound()
+	}
+
+	processor := wd.Async(wd.AsyncConfig{
+		Async:      config.asyncMode(),
+		Retries:    config.Retries,
+		Delay:      config.Delay,
+		Workers:    config.Workers,
+		Queue:      queue,
+		Registerer: prometheus.DefaultRegisterer,
+	}, webhookHandler)
+
 	mux := http.NewServeMux()
 	if !config.DisableMetrics {
 		var metricsHandler = promhttp.Handler()
@@ -167,9 +177,9 @@ func runWebhook(global context.Context, webhook http.Handler, metrics *wd.Metric
 		mux.Handle("/metrics", metricsHandler)
 	}
 	if len(config.Secret) == 0 {
-		mux.Handle("/", webhook)
+		mux.Handle("/", processor)
 	} else {
-		mux.Handle("/", protected(config.Secret, webhook, metrics))
+		mux.Handle("/", protected(config.Secret, processor, metrics))
 	}
 
 	var handler http.Handler = mux
@@ -183,12 +193,28 @@ func runWebhook(global context.Context, webhook http.Handler, metrics *wd.Metric
 		Handler: handler,
 	}
 
+	var wg sync.WaitGroup
+
 	ctx, cancel := context.WithCancel(global)
 	defer cancel()
+
+	wg.Add(1)
 	go func() {
+		defer wg.Wait()
 		<-ctx.Done()
 		_ = srv.Close()
 	}()
+
+	for i := 0; i < config.AsyncWorkers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			log.Println("worker", i, "started")
+			processor.Run(ctx)
+		}(i)
+	}
+	defer wg.Done()
+
 	log.Println("started on", config.Bind)
 
 	switch {

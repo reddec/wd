@@ -53,8 +53,11 @@ In case of asynchronous execution:
 1. request will be dumped to a temporary file on disk
 2. client will get 204 No Content
 3. in background go-routine, request will be streamed from disk like it was sent by client
-4. it will retry execute request again and again during 1 + `--retries` attempts in case non-2xx code returned. Output
+4. file name will be added to the internal queue (`-q, --queue`)
+5. it will retry execute request again and again during 1 + `--retries` attempts in case non-2xx code returned. Output
    will be dropped.
+
+Maximum number of parallel async worker can be limited by `-A,--async-worker`, default is `2`.
 
 Async mode can be activated by:
 
@@ -111,7 +114,9 @@ Application Options:
   -a, --async=[auto|forced|disabled] Async mode. auto - relies on async param in query, forced - always async, disabled - no async (default: auto) [$ASYNC]
   -r, --retries=                     Number of additional retries after first attempt (async only) (default: 3) [$RETRIES]
   -d, --delay=                       Delay between attempts (async only) (default: 3s) [$DELAY]
-  -W, --workers=                     Maximum number of workers. Default is 2 x num CPU [$WORKERS]
+  -W, --workers=                     Maximum number of workers for sync requests. Default is 2 x num CPU [$WORKERS]
+  -A, --async-workers=               Number of workers to process async requests (default: 2) [$ASYNC_WORKERS]
+  -q, --queue=                       Queue size for async requests. 0 means unbound (default: 8192) [$QUEUE]
   -M, --disable-metrics              Disable prometheus metrics [$DISABLE_METRICS]
       --secure-metrics               Require token to access metrics endpoint [$SECURE_METRICS]
       --auto-tls=                    Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
@@ -161,7 +166,9 @@ Application Options:
   -a, --async=[auto|forced|disabled] Async mode. auto - relies on async param in query, forced - always async, disabled - no async (default: auto) [$ASYNC]
   -r, --retries=                     Number of additional retries after first attempt (async only) (default: 3) [$RETRIES]
   -d, --delay=                       Delay between attempts (async only) (default: 3s) [$DELAY]
-  -W, --workers=                     Maximum number of workers. Default is 2 x num CPU [$WORKERS]
+  -W, --workers=                     Maximum number of workers for sync requests. Default is 2 x num CPU [$WORKERS]
+  -A, --async-workers=               Number of workers to process async requests (default: 2) [$ASYNC_WORKERS]
+  -q, --queue=                       Queue size for async requests. 0 means unbound (default: 8192) [$QUEUE]
   -M, --disable-metrics              Disable prometheus metrics [$DISABLE_METRICS]
       --secure-metrics               Require token to access metrics endpoint [$SECURE_METRICS]
       --auto-tls=                    Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]

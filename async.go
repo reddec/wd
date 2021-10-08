@@ -63,6 +63,9 @@ func Async(config AsyncConfig, handler http.Handler) *AsyncProcessor {
 	if config.Queue == nil {
 		config.Queue = Unbound()
 	}
+	if config.Delay <= 0 {
+		config.Delay = DefaultDelay
+	}
 
 	registry := config.Registerer
 	if registry == nil {

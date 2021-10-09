@@ -39,6 +39,7 @@ type Config struct {
 	AsyncWorkers   int           `short:"A" long:"async-workers" env:"ASYNC_WORKERS" description:"Number of workers to process async requests" default:"2"`
 	Queue          int           `short:"q" long:"queue" env:"QUEUE" description:"Queue size for async requests. 0 means unbound" default:"8192"`
 	Payload        string        `short:"p" long:"payload" env:"PAYLOAD" description:"Payload type - how to pass request body to the script" default:"stdin" choice:"stdin" choice:"arg" choice:"env"`
+	PayloadSize    int64         `short:"P" long:"payload-size" env:"PAYLOAD_SIZE" description:"Maximum payload size in bytes. Zero or negative means unlimited" default:"10485760"` // default - 10MB
 	DisableMetrics bool          `short:"M" long:"disable-metrics" env:"DISABLE_METRICS" description:"Disable prometheus metrics"`
 	SecureMetrics  bool          `long:"secure-metrics" env:"SECURE_METRICS" description:"Require token to access metrics endpoint"`
 	// TLS
@@ -179,21 +180,26 @@ func runWebhook(global context.Context, webhookHandler http.Handler, metrics *wd
 		}
 		mux.Handle("/metrics", metricsHandler)
 	}
-	if len(config.Secret) == 0 {
-		mux.Handle("/", processor)
-	} else {
-		mux.Handle("/", protected(config.Secret, processor, metrics))
+
+	var mainHandler http.Handler = processor
+
+	if config.PayloadSize > 0 {
+		mainHandler = wd.RequestSizeLimit(config.PayloadSize, mainHandler)
 	}
 
-	var handler http.Handler = mux
+	if len(config.Secret) > 0 {
+		mainHandler = protected(config.Secret, mainHandler, metrics)
+	}
 
 	if config.CORS {
-		handler = cors.AllowAll().Handler(handler)
+		mainHandler = cors.AllowAll().Handler(mainHandler)
 	}
+
+	mux.Handle("/", mainHandler)
 
 	srv := http.Server{
 		Addr:    config.Bind,
-		Handler: handler,
+		Handler: mux,
 	}
 
 	var wg sync.WaitGroup

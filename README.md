@@ -76,7 +76,8 @@ because no information store in memory, so it's possible to handle unlimited amo
 
 However, in case script does not support processing of STDIN (or just for convenience) it is possible to cache payload
 into memory and pass it as environment variable `REQUEST_PAYLOAD` (`--payload env`) or as last argument of
-a script (`--payload arg`).
+a script (`--payload arg`). It might be a good idea to adjust maximum payload size by
+`--payload-size, -P` (default is 10Mib).
 
 > Do not use `--payload env` or `--payload arg` for large payloads!
 
@@ -146,6 +147,7 @@ Application Options:
   -A, --async-workers=               Number of workers to process async requests (default: 2) [$ASYNC_WORKERS]
   -q, --queue=                       Queue size for async requests. 0 means unbound (default: 8192) [$QUEUE]
   -p, --payload=[stdin|arg|env]      Payload type - how to pass request body to the script (default: stdin) [$PAYLOAD]
+  -P, --payload-size=                Maximum payload size in bytes. Zero or negative means unlimited (default: 10485760) [$PAYLOAD_SIZE]
   -M, --disable-metrics              Disable prometheus metrics [$DISABLE_METRICS]
       --secure-metrics               Require token to access metrics endpoint [$SECURE_METRICS]
       --auto-tls=                    Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
@@ -198,6 +200,7 @@ Application Options:
   -A, --async-workers=               Number of workers to process async requests (default: 2) [$ASYNC_WORKERS]
   -q, --queue=                       Queue size for async requests. 0 means unbound (default: 8192) [$QUEUE]
   -p, --payload=[stdin|arg|env]      Payload type - how to pass request body to the script (default: stdin) [$PAYLOAD]
+  -P, --payload-size=                Maximum payload size in bytes. Zero or negative means unlimited (default: 10485760) [$PAYLOAD_SIZE]
   -M, --disable-metrics              Disable prometheus metrics [$DISABLE_METRICS]
       --secure-metrics               Require token to access metrics endpoint [$SECURE_METRICS]
       --auto-tls=                    Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]

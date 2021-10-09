@@ -10,6 +10,34 @@ builds:
       - arm64
       - arm
     main: ./cmd/wd
+nfpms:
+  - id: debian
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    replacements:
+      Linux: linux
+      386: i386
+    homepage: https://github.com/reddec/wd
+    maintainer: Baryshnikov Aleksandr <owner@reddec.net>
+    description: Yet another webhooks daemon
+    license: MIT
+    bindir: /usr/bin
+    formats:
+      - deb
+    scripts:
+      postinstall: "packaging/debian/postinstall.sh"
+      preremove: "packaging/debian/preremove.sh"
+    empty_folders:
+      - /var/webhooks
+      - /etc/webhooks
+    contents:
+      - src: packaging/systemd/webhooks.service
+        dst: /etc/systemd/system/webhooks.service
+
+      - src: packaging/systemd/webhooks.env
+        dst: /etc/webhooks/webhooks.env
+        type: config|noreplace
+        file_info:
+          mode: 0600
 brews:
   - tap:
       owner: reddec

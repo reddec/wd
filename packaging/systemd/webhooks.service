@@ -1,0 +1,12 @@
+[Unit]
+Description=Webhooks Daemon
+
+[Service]
+WorkingDirectory=/etc/webhooks
+EnvironmentFile=/etc/webhooks/webhooks.env
+ExecStart=/usr/bin/wd serve /var/webhooks
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

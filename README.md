@@ -18,13 +18,32 @@ Supports:
 * Designed to work in memory-constrained environments
 * Supports async mode
 
+
 ## Installation
+
+### Precompiled binaries
 
 From binaries and packages - [releases page](https://github.com/reddec/wd/releases)
 
-From brew for MacOS (Intel and Apple Silicon) - `brew install reddec/tap/wd`
+**Debian/Ubuntu** packages defaults:
+* systemd service `webhooks`, enabled and started after installation
+* webhooks directory is `/var/webhooks`
+* `run-as-script-owner` enabled by default
+* metrics are disabled
+* configuration file is in `/etc/webhooks/webhooks.env` with 0600 permission
+* binding is `127.0.0.1:8080`
 
-From source `go install github.com/reddec/wd@latest`
+### Brew (MacOS)
+
+    brew install reddec/tap/wd
+
+Supports both Intel and Apple Silicon (arm)
+
+### Build
+
+From source, requires g1.17+
+    
+    go install github.com/reddec/wd@latest
 
 ## Minimal running examples
 
@@ -37,6 +56,9 @@ expose current dir
     wd serve .
 
 ## Usage
+
+Even if `wd` comes with already good enough default parameters, it is not opinionated and allows 
+precisely adjust almost any kind of behaviour.
 
 ### Metrics
 

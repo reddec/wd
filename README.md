@@ -72,10 +72,10 @@ By-default, `wd` exposes metrics endpoint as `/metrics` without restrictions. Yo
 
 In case of asynchronous execution:
 
-1. request will be dumped to a temporary file on disk
-2. client will get 204 No Content
-3. in background go-routine, request will be streamed from disk like it was sent by client
-4. file name will be added to the internal queue (`-q, --queue`)
+1. request will be dumped to a temporary file on disk 
+2. file name will be added to the internal queue (`-q, --queue`)
+3. client will get 204 No Content
+4. in background go-routine, request will be streamed from disk like it was sent by client
 5. it will retry execute request again and again during 1 + `--retries` attempts in case non-2xx code returned. Output
    will be dropped.
 

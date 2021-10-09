@@ -22,6 +22,13 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+	builtBy = "unknown"
+)
+
 type Config struct {
 	Serve CmdServe `command:"serve" description:"serve server from directory"`
 	Run   CmdRun   `command:"run" description:"run single script"`
@@ -79,6 +86,9 @@ var config Config
 
 func main() {
 	parser := flags.NewParser(&config, flags.Default)
+	parser.ShortDescription = "Yet another webhooks daemon"
+	parser.LongDescription = fmt.Sprintf("Yet another webhooks daemon\nwd %s, commit %s, built at %s by %s\nAuthor: Aleksandr Baryshnikov <owner@reddec.net>", version, commit, date, builtBy)
+
 	_, err := parser.Parse()
 	if err != nil {
 		os.Exit(1)

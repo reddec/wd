@@ -69,6 +69,26 @@ to disable async execution completely use flag `--async disabled`
 During async execution the special env variable `HEADER_X_ATTEMPT` will be passed to the script. It contains attempt
 number starting from 1.
 
+### Payload
+
+By-default, request body will be streamed to STDIN of script. This approach allows users to minimize memory consumption
+because no information store in memory, so it's possible to handle unlimited amount of data (ie: streaming).
+
+However, in case script does not support processing of STDIN (or just for convenience) it is possible to cache payload
+into memory and pass it as environment variable `REQUEST_PAYLOAD` (`--payload env`) or as last argument of
+a script (`--payload arg`).
+
+> Do not use `--payload env` or `--payload arg` for large payloads!
+
+General linux limits: 
+* Max argument size - ~32Kib and could vary for each setup
+* Max environment variable size - at least 4Kib and could vary for each setup
+
+In case of `--payload env` or `--payload  arg` payload has to be read fully before passed to a script
+which requires additional memory close double of request body size.
+
+Shorthand for `--payload` flag is `-p`.
+
 ### Common
 
 ```
@@ -76,20 +96,28 @@ Usage:
   wd [OPTIONS] <run | serve | token>
 
 Application Options:
-      --cors                Enable CORS [$CORS]
-  -b, --bind=               Binding address (default: 127.0.0.1:8080) [$BIND]
-  -t, --timeout=            Maximum execution timeout (default: 120s) [$TIMEOUT]
-  -s, --secret=             JWT secret for checking tokens. Use token command to create token [$SECRET]
-  -B, --buffer=             Buffer response size (default: 8192) [$BUFFER]
-  -M, --disable-metrics     Disable prometheus metrics [$DISABLE_METRICS]
-      --auto-tls=           Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
-      --auto-tls-cache-dir= Location where to store certificates (default: .certs) [$AUTO_TLS_CACHE_DIR]
-      --tls                 Enable HTTPS serving with TLS. Ignored with --auto-tls' [$TLS]
-      --tls-cert=           Path to TLS certificate (default: server.crt) [$TLS_CERT]
-      --tls-key=            Path to TLS key (default: server.key) [$TLS_KEY]
+      --cors                         Enable CORS [$CORS]
+  -b, --bind=                        Binding address (default: 127.0.0.1:8080) [$BIND]
+  -t, --timeout=                     Maximum execution timeout (default: 120s) [$TIMEOUT]
+  -s, --secret=                      JWT secret for checking tokens. Use token command to create token [$SECRET]
+  -B, --buffer=                      Buffer response size (default: 8192) [$BUFFER]
+  -a, --async=[auto|forced|disabled] Async mode. auto - relies on async param in query, forced - always async, disabled - no async (default: auto) [$ASYNC]
+  -r, --retries=                     Number of additional retries after first attempt (async only) (default: 3) [$RETRIES]
+  -d, --delay=                       Delay between attempts (async only) (default: 3s) [$DELAY]
+  -W, --workers=                     Maximum number of workers for sync requests. Default is 2 x num CPU [$WORKERS]
+  -A, --async-workers=               Number of workers to process async requests (default: 2) [$ASYNC_WORKERS]
+  -q, --queue=                       Queue size for async requests. 0 means unbound (default: 8192) [$QUEUE]
+  -p, --payload=[stdin|arg|env]      Payload type - how to pass request body to the script (default: stdin) [$PAYLOAD]
+  -M, --disable-metrics              Disable prometheus metrics [$DISABLE_METRICS]
+      --secure-metrics               Require token to access metrics endpoint [$SECURE_METRICS]
+      --auto-tls=                    Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
+      --auto-tls-cache-dir=          Location where to store certificates (default: .certs) [$AUTO_TLS_CACHE_DIR]
+      --tls                          Enable HTTPS serving with TLS. Ignored with --auto-tls' [$TLS]
+      --tls-cert=                    Path to TLS certificate (default: server.crt) [$TLS_CERT]
+      --tls-key=                     Path to TLS key (default: server.key) [$TLS_KEY]
 
 Help Options:
-  -h, --help                Show this help message
+  -h, --help                         Show this help message
 
 Available commands:
   run    run single script
@@ -117,6 +145,7 @@ Application Options:
   -W, --workers=                     Maximum number of workers for sync requests. Default is 2 x num CPU [$WORKERS]
   -A, --async-workers=               Number of workers to process async requests (default: 2) [$ASYNC_WORKERS]
   -q, --queue=                       Queue size for async requests. 0 means unbound (default: 8192) [$QUEUE]
+  -p, --payload=[stdin|arg|env]      Payload type - how to pass request body to the script (default: stdin) [$PAYLOAD]
   -M, --disable-metrics              Disable prometheus metrics [$DISABLE_METRICS]
       --secure-metrics               Require token to access metrics endpoint [$SECURE_METRICS]
       --auto-tls=                    Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
@@ -131,7 +160,6 @@ Help Options:
 [run command arguments]
   Binary:                            binary to run
   Args:                              arguments
-
 ```
 
 Examples:
@@ -169,6 +197,7 @@ Application Options:
   -W, --workers=                     Maximum number of workers for sync requests. Default is 2 x num CPU [$WORKERS]
   -A, --async-workers=               Number of workers to process async requests (default: 2) [$ASYNC_WORKERS]
   -q, --queue=                       Queue size for async requests. 0 means unbound (default: 8192) [$QUEUE]
+  -p, --payload=[stdin|arg|env]      Payload type - how to pass request body to the script (default: stdin) [$PAYLOAD]
   -M, --disable-metrics              Disable prometheus metrics [$DISABLE_METRICS]
       --secure-metrics               Require token to access metrics endpoint [$SECURE_METRICS]
       --auto-tls=                    Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
@@ -209,28 +238,35 @@ Usage:
   wd [OPTIONS] token [token-OPTIONS] [Hooks...]
 
 Application Options:
-      --cors                Enable CORS [$CORS]
-  -b, --bind=               Binding address (default: 127.0.0.1:8080) [$BIND]
-  -t, --timeout=            Maximum execution timeout (default: 120s) [$TIMEOUT]
-  -s, --secret=             JWT secret for checking tokens. Use token command to create token [$SECRET]
-  -B, --buffer=             Buffer response size (default: 8192) [$BUFFER]
-  -M, --disable-metrics     Disable prometheus metrics [$DISABLE_METRICS]
-      --secure-metrics      Require token to access metrics endpoint [$SECURE_METRICS]
-      --auto-tls=           Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
-      --auto-tls-cache-dir= Location where to store certificates (default: .certs) [$AUTO_TLS_CACHE_DIR]
-      --tls                 Enable HTTPS serving with TLS. Ignored with --auto-tls' [$TLS]
-      --tls-cert=           Path to TLS certificate (default: server.crt) [$TLS_CERT]
-      --tls-key=            Path to TLS key (default: server.key) [$TLS_KEY]
+      --cors                         Enable CORS [$CORS]
+  -b, --bind=                        Binding address (default: 127.0.0.1:8080) [$BIND]
+  -t, --timeout=                     Maximum execution timeout (default: 120s) [$TIMEOUT]
+  -s, --secret=                      JWT secret for checking tokens. Use token command to create token [$SECRET]
+  -B, --buffer=                      Buffer response size (default: 8192) [$BUFFER]
+  -a, --async=[auto|forced|disabled] Async mode. auto - relies on async param in query, forced - always async, disabled - no async (default: auto) [$ASYNC]
+  -r, --retries=                     Number of additional retries after first attempt (async only) (default: 3) [$RETRIES]
+  -d, --delay=                       Delay between attempts (async only) (default: 3s) [$DELAY]
+  -W, --workers=                     Maximum number of workers for sync requests. Default is 2 x num CPU [$WORKERS]
+  -A, --async-workers=               Number of workers to process async requests (default: 2) [$ASYNC_WORKERS]
+  -q, --queue=                       Queue size for async requests. 0 means unbound (default: 8192) [$QUEUE]
+  -p, --payload=[stdin|arg|env]      Payload type - how to pass request body to the script (default: stdin) [$PAYLOAD]
+  -M, --disable-metrics              Disable prometheus metrics [$DISABLE_METRICS]
+      --secure-metrics               Require token to access metrics endpoint [$SECURE_METRICS]
+      --auto-tls=                    Automatic TLS (Let's Encrypt) for specified domains. Service must be accessible by 80/443 port. Disables --tls [$AUTO_TLS]
+      --auto-tls-cache-dir=          Location where to store certificates (default: .certs) [$AUTO_TLS_CACHE_DIR]
+      --tls                          Enable HTTPS serving with TLS. Ignored with --auto-tls' [$TLS]
+      --tls-cert=                    Path to TLS certificate (default: server.crt) [$TLS_CERT]
+      --tls-key=                     Path to TLS key (default: server.key) [$TLS_KEY]
 
 Help Options:
-  -h, --help                Show this help message
+  -h, --help                         Show this help message
 
 [token command options]
-      -n, --name=           Name of token, will be mapped as sub [$NAME]
-      -e, --expiration=     Token expiration. Zero means no expiration (default: 0) [$EXPIRATION]
+      -n, --name=                    Name of token, will be mapped as sub [$NAME]
+      -e, --expiration=              Token expiration. Zero means no expiration (default: 0) [$EXPIRATION]
 
 [token command arguments]
-  Hooks:                    allowed hooks (nothing means all hooks)
+  Hooks:                             allowed hooks (nothing means all hooks)
 ```
 
 **basic token**

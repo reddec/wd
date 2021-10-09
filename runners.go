@@ -8,7 +8,7 @@ import (
 )
 
 type Runner interface {
-	// Command to execute. Return nil if not applicable.
+	// Command to execute. Returns nil if not applicable.
 	Command(req *http.Request) []string
 }
 
@@ -20,9 +20,9 @@ func (r RunnerFunc) Command(req *http.Request) []string {
 
 func StaticScript(command string, args ...string) RunnerFunc {
 	cli := append([]string{command}, args...)
-	return RunnerFunc(func(req *http.Request) []string {
+	return func(req *http.Request) []string {
 		return cli
-	})
+	}
 }
 
 type DirectoryRunner struct {

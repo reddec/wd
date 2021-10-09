@@ -38,6 +38,7 @@ type Config struct {
 	Workers        int64         `short:"W" long:"workers" env:"WORKERS" description:"Maximum number of workers for sync requests. Default is 2 x num CPU"`
 	AsyncWorkers   int           `short:"A" long:"async-workers" env:"ASYNC_WORKERS" description:"Number of workers to process async requests" default:"2"`
 	Queue          int           `short:"q" long:"queue" env:"QUEUE" description:"Queue size for async requests. 0 means unbound" default:"8192"`
+	Payload        string        `short:"p" long:"payload" env:"PAYLOAD" description:"Payload type - how to pass request body to the script" default:"stdin" choice:"stdin" choice:"arg" choice:"env"`
 	DisableMetrics bool          `short:"M" long:"disable-metrics" env:"DISABLE_METRICS" description:"Disable prometheus metrics"`
 	SecureMetrics  bool          `long:"secure-metrics" env:"SECURE_METRICS" description:"Require token to access metrics endpoint"`
 	// TLS
@@ -109,6 +110,7 @@ func serve(global context.Context) error {
 		Timeout:        config.Timeout,
 		BufferSize:     config.Buffer,
 		Metrics:        metrics,
+		ArgType:        config.argType(),
 		RunAsFileOwner: config.Serve.RunAsScriptOwner,
 	}, &wd.DirectoryRunner{
 		AllowDotFiles: config.Serve.EnableDotFiles,
@@ -125,6 +127,7 @@ func run(global context.Context) error {
 		Timeout:        config.Timeout,
 		BufferSize:     config.Buffer,
 		Metrics:        metrics,
+		ArgType:        config.argType(),
 		RunAsFileOwner: false,
 	}, wd.StaticScript(config.Run.Args.Binary, config.Run.Args.Args...))
 	return runWebhook(global, webhook, metrics)
@@ -294,5 +297,18 @@ func (cfg Config) asyncMode() wd.AsyncMode {
 		fallthrough
 	default:
 		return wd.AsyncModeAuto
+	}
+}
+
+func (cfg Config) argType() wd.ArgType {
+	switch cfg.Payload {
+	case "arg":
+		return wd.ArgTypeParam
+	case "env":
+		return wd.ArgTypeEnv
+	case "stdin":
+		fallthrough
+	default:
+		return wd.ArgTypeStdin
 	}
 }

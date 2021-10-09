@@ -17,8 +17,26 @@ import (
 	"github.com/reddec/wd/internal"
 )
 
+// ArgType defines how to pass request body to the executable.
+type ArgType byte
+
+const (
+	// ArgTypeStdin can be used to stream request body as stdin. It's default methods and most optimal
+	// for memory-constrained installation because data streamed as-is without caching.
+	ArgTypeStdin ArgType = iota
+	// ArgTypeParam used to pass cached request body as string as last parameter of command. It's convenient but not
+	// recommended way.
+	ArgTypeParam
+	// ArgTypeEnv used to pass cached request body as string as environment variable ArgEnv. Do not use it for
+	// requests with payload more than ~2-3KB.
+	ArgTypeEnv
+)
+
+const ArgEnv = "REQUEST_BODY" // Environment variable for ArgTypeEnv
+
 // Config for webhook daemon. All fields are completely optional.
 type Config struct {
+	ArgType        ArgType       // how to pass request body to script. Default is by stdin
 	RunAsFileOwner bool          // (posix only) run as user and group same as defined on file (first argument) (ie: gid, uid), must be run as root.
 	TempDir        bool          // create new temp work dir for each request inside main WorkDir
 	WorkDir        string        // location for scripts work dir. Acts as parent dir in case TempDir enabled. Also, in case TempDir enabled and WorkDir is empty - default system temp dir will be used
@@ -95,7 +113,6 @@ func (wh *webhookDaemon) ServeHTTP(writer http.ResponseWriter, req *http.Request
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = workDir
 	cmd.Stdout = writer
-	cmd.Stdin = req.Body
 	cmd.Env = os.Environ()
 	for k, v := range req.Header {
 		cmd.Env = append(cmd.Env, "HEADER_"+toEnv(k)+"="+strings.Join(v, ","))
@@ -110,6 +127,28 @@ func (wh *webhookDaemon) ServeHTTP(writer http.ResponseWriter, req *http.Request
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
 		log.Println("failed set credentials based on file:", err)
 		return
+	}
+
+	var requestBody string
+	if wh.ArgType.IsCachingType() {
+		data, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			http.Error(writer, err.Error(), http.StatusBadRequest)
+			log.Println("failed read request body:", err)
+			return
+		}
+		requestBody = string(data)
+	}
+
+	switch wh.ArgType {
+	case ArgTypeParam:
+		cmd.Args = append(cmd.Args, requestBody)
+	case ArgTypeEnv:
+		cmd.Env = append(cmd.Env, ArgEnv+"="+requestBody)
+	case ArgTypeStdin:
+		fallthrough
+	default:
+		cmd.Stdin = req.Body
 	}
 
 	err = cmd.Run()
@@ -234,4 +273,8 @@ func (ms *meteredStream) Read(p []byte) (n int, err error) {
 
 func (ms *meteredStream) Close() error {
 	return ms.source.Close()
+}
+
+func (at ArgType) IsCachingType() bool {
+	return at == ArgTypeEnv || at == ArgTypeParam
 }

@@ -43,7 +43,7 @@ type AsyncConfig struct {
 	Async      AsyncMode             // cache request into temp, returns 204 and process request in background
 	Retries    uint                  // number of additional retries after first attempt in case of async processing
 	Delay      time.Duration         // delay between retries for async processing. If delay is less or equal to 0, DefaultDelay will be used
-	Workers    int64                 // maximum amount of parallel sync requests. If <= 0, 2 * NumCPU used
+	Workers    int64                 // maximum amount of parallel sync requests. If it <= 0, 2 * NumCPU used
 	Queue      Queue                 // queue for async requests tasks. If not defined - Unbound used
 	Registerer prometheus.Registerer // prometheus registry. If not defined - new one will be used. Use prometheus.DefaultRegisterer to expose metrics globally
 }

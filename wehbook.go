@@ -49,11 +49,14 @@ type Config struct {
 //
 // Webhook handler - matches request path as script path in ScriptsDir.
 // Converts headers to HEADER_<capital snake case> environment, converts query params to QUERY_<capital snake case>
-// environment variables.
+// environment variables. For example:
 //
 //      HEADER_CONTENT_TYPE
 //      QUERY_PAGE
 //
+// Additionally passed: REQUEST_PATH, REQUEST_METHOD, CLIENT_ADDR (remote IP:port of incoming connection; not including X-Forwarded-For)
+//
+// Special parameter for ArgType env - REQUEST_PAYLOAD.
 func New(config Config, runner Runner) http.Handler {
 	return &webhookDaemon{
 		Config: config,
@@ -121,7 +124,10 @@ func (wh *webhookDaemon) ServeHTTP(writer http.ResponseWriter, req *http.Request
 	for k, v := range req.URL.Query() {
 		cmd.Env = append(cmd.Env, "QUERY_"+toEnv(k)+"="+strings.Join(v, ","))
 	}
-	cmd.Env = append(cmd.Env, "REQUEST_PATH="+req.URL.Path, "REQUEST_METHOD="+req.Method)
+	cmd.Env = append(cmd.Env,
+		"REQUEST_PATH="+req.URL.Path,
+		"REQUEST_METHOD="+req.Method,
+		"CLIENT_ADDR="+req.RemoteAddr)
 
 	if err := wh.setRunCredentials(cmd, command[0]); err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)

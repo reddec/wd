@@ -10,6 +10,16 @@ builds:
       - arm64
       - arm
     main: ./cmd/wd
+release:
+  footer: |
+    Ansible quick install for Debian systems
+
+    ```yaml
+    - name: "Install WD"
+      apt:
+        deb: "https://github.com/reddec/wd/releases/download/v{{.Version}}/wd_{{.Version}}_linux_amd64.deb"
+    ```
+
 nfpms:
   - id: debian
     file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"

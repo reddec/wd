@@ -112,6 +112,18 @@ which requires additional memory close double of request body size.
 
 Shorthand for `--payload` flag is `-p`.
 
+### Containers as webhooks
+
+`wd` can perfectly work with container runtime. Especially with podman,
+because it could be launched without daemon.
+
+Example script `example-date`:
+
+```shell
+#!/bin/sh
+exec podman run --rm -i ubuntu:20.04 date
+```
+
 ### Common
 
 ```

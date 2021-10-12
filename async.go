@@ -245,7 +245,7 @@ func (ap *AsyncProcessor) processRequestAsyncAttempt(ctx context.Context, tmpFil
 
 	res := &nopWriter{}
 	ap.processor.ServeHTTP(res, req)
-	if res.status == 0 || res.status/100 == 2 {
+	if res.status == 0 || res.status/100 != 5 { // retry only on 5xx
 		return nil
 	}
 

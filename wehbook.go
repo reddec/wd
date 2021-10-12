@@ -186,6 +186,8 @@ func (wh *Webhooks) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	log.Printf("manifest: %+v", manifest)
+
 	// count input size
 	meter := internal.NewMeteredStream(req.Body)
 	defer func() {

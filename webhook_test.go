@@ -41,7 +41,7 @@ func Test_scriptRunner(t *testing.T) {
 	assert.Equal(t, "123", res.Body.String())
 
 	t.Run("override xattr", func(t *testing.T) {
-		err := xattr.Set(env.Path(script), wd.AttrAsync, []byte("true"))
+		err := xattr.Set(env.Path(script), wd.AttrAsync, []byte("forced"))
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodPost, "/"+script, nil)

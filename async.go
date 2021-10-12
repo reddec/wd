@@ -129,8 +129,8 @@ func (wh *Webhooks) openStoredRequestFile(item *QueuedWebhook) (*os.File, error)
 	return nil, ErrUnprocessableFile
 }
 
-func (wh *Webhooks) isAsyncRequest(req *http.Request) bool {
-	switch wh.config.Async {
+func (wh *Webhooks) isAsyncRequest(mode AsyncMode, req *http.Request) bool {
+	switch mode {
 	case AsyncModeDisabled:
 		return false
 	case AsyncModeForced:

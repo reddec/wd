@@ -123,16 +123,12 @@ The following parameters can be used to override parameters provided during star
 
 | Attribute              | Type     | Overrides                   |
 |------------------------|----------|-----------------------------|
-| `user.webhook.async`   | bool     | `--async`                   |
+| `user.webhook.async`   | mode     | `--async`                   |
 | `user.webhook.timeout` | duration | `--timeout`                 |
 | `user.webhook.delay`   | duration | `--delay`                   |
 | `user.webhook.retries` | int64    | `--retries`                 |
 
 > all values are in string Golang default representation
-
-For `user.webhook.async`:
-- `true` is equal to `--async forced` for the script
-- `false` is equal to `--async disabled` for the script
 
 ### Containers as webhooks
 

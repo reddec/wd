@@ -10,7 +10,7 @@ import (
 
 type Manifest struct {
 	Command []string
-	Async   bool
+	Async   AsyncMode
 	Timeout time.Duration
 	Retries uint
 	Delay   time.Duration
@@ -44,7 +44,7 @@ func StaticScript(command string, args ...string) RunnerFunc {
 }
 
 const (
-	AttrAsync   = "user.webhook.async"   // boolean (true/false), forces async execution for script
+	AttrAsync   = "user.webhook.async"   // auto|disabled|forced, forces async execution for script
 	AttrTimeout = "user.webhook.timeout" // duration, maximum execution time
 	AttrDelay   = "user.webhook.delay"   // duration, interval between attempts
 	AttrRetries = "user.webhook.retries" // int64, maximum number of additional attempts

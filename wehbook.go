@@ -180,13 +180,14 @@ func (wh *Webhooks) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 	started := time.Now()
 
 	// get manifest or return 404
-	manifest := wh.runner.Command(req, wh.defaultManifest(req))
+	manifest := wh.runner.Command(req, wh.defaultManifest())
 	if manifest == nil {
 		http.NotFound(writer, req)
 		return
 	}
+	isAsync := wh.isAsyncRequest(manifest.Async, req)
 
-	log.Printf("manifest: %+v", manifest)
+	log.Printf("manifest: %+v, async: %v", manifest, isAsync)
 
 	// count input size
 	meter := internal.NewMeteredStream(req.Body)
@@ -206,16 +207,16 @@ func (wh *Webhooks) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 		wh.requestsTime.WithLabelValues(
 			req.URL.Path,
 			strconv.Itoa(response.StatusCode()),
-			strconv.FormatBool(manifest.Async),
+			strconv.FormatBool(isAsync),
 		).Add(time.Since(started).Seconds())
 		wh.trafficOut.WithLabelValues(req.URL.Path).Add(float64(response.Total()))
 	}()
 
 	defer response.Flush()
 
-	wh.requestsNum.WithLabelValues(req.URL.Path, strconv.FormatBool(manifest.Async)).Inc()
+	wh.requestsNum.WithLabelValues(req.URL.Path, strconv.FormatBool(isAsync)).Inc()
 
-	if manifest.Async {
+	if isAsync {
 		if err := wh.enqueueWebhook(req, manifest); err != nil {
 			log.Println("failed enqueue task:", err)
 			http.Error(writer, err.Error(), http.StatusInternalServerError)
@@ -354,9 +355,9 @@ func (wh *Webhooks) setRunCredentials(cmd *exec.Cmd, script string) error {
 	return internal.SetCreds(cmd, script)
 }
 
-func (wh *Webhooks) defaultManifest(req *http.Request) Manifest {
+func (wh *Webhooks) defaultManifest() Manifest {
 	return Manifest{
-		Async:   wh.isAsyncRequest(req),
+		Async:   wh.config.Async,
 		Timeout: wh.config.Timeout,
 		Retries: wh.config.Retries,
 		Delay:   wh.config.Delay,
@@ -369,4 +370,34 @@ func toEnv(name string) string {
 
 func (at ArgType) IsCachingType() bool {
 	return at == ArgTypeEnv || at == ArgTypeParam
+}
+
+var ErrUnknownAsyncMode = errors.New("async mode unknown")
+
+func (mode *AsyncMode) UnmarshalText(data []byte) error {
+	switch string(data) {
+	case "disabled":
+		*mode = AsyncModeDisabled
+	case "forced":
+		*mode = AsyncModeForced
+	case "auto":
+		*mode = AsyncModeAuto
+	default:
+		return ErrUnknownAsyncMode
+	}
+	return nil
+}
+
+func (mode AsyncMode) String() string {
+	switch mode {
+
+	case AsyncModeDisabled:
+		return "disabled"
+	case AsyncModeForced:
+		return "forced"
+	case AsyncModeAuto:
+		return "auto"
+	default:
+		return "unknown(" + strconv.Itoa(int(mode)) + ")"
+	}
 }

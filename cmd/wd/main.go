@@ -293,16 +293,11 @@ func protected(secret string, handler http.Handler) http.Handler {
 }
 
 func (cfg Config) asyncMode() wd.AsyncMode {
-	switch cfg.Async {
-	case "forced":
-		return wd.AsyncModeForced
-	case "disabled":
-		return wd.AsyncModeDisabled
-	case "auto":
-		fallthrough
-	default:
-		return wd.AsyncModeAuto
+	var mode wd.AsyncMode
+	if err := mode.UnmarshalText([]byte(cfg.Async)); err == nil {
+		return mode
 	}
+	return wd.AsyncModeAuto
 }
 
 func (cfg Config) argType() wd.ArgType {

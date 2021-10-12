@@ -114,34 +114,42 @@ func serve(global context.Context) error {
 	if err != nil {
 		return fmt.Errorf("detect scripts path: %w", err)
 	}
-	metrics := wd.NewDefaultMetrics()
 	webhook := wd.New(wd.Config{
 		TempDir:        !config.Serve.DisableIsolation,
 		WorkDir:        config.Serve.WorkDir,
 		Timeout:        config.Timeout,
 		BufferSize:     config.Buffer,
-		Metrics:        metrics,
 		ArgType:        config.argType(),
+		Async:          config.asyncMode(),
+		Retries:        config.Retries,
+		Delay:          config.Delay,
+		Workers:        config.Workers,
+		Queue:          config.queue(),
+		Registerer:     prometheus.DefaultRegisterer,
 		RunAsFileOwner: config.Serve.RunAsScriptOwner,
 	}, &wd.DirectoryRunner{
 		AllowDotFiles: config.Serve.EnableDotFiles,
 		ScriptsDir:    rootPath,
 	})
-	return runWebhook(global, webhook, metrics)
+	return runWebhook(global, webhook)
 }
 
 func run(global context.Context) error {
-	metrics := wd.NewDefaultMetrics()
 	webhook := wd.New(wd.Config{
 		TempDir:        false,
 		WorkDir:        ".",
 		Timeout:        config.Timeout,
 		BufferSize:     config.Buffer,
-		Metrics:        metrics,
 		ArgType:        config.argType(),
+		Async:          config.asyncMode(),
+		Retries:        config.Retries,
+		Delay:          config.Delay,
+		Workers:        config.Workers,
+		Queue:          config.queue(),
+		Registerer:     prometheus.DefaultRegisterer,
 		RunAsFileOwner: false,
 	}, wd.StaticScript(config.Run.Args.Binary, config.Run.Args.Args...))
-	return runWebhook(global, webhook, metrics)
+	return runWebhook(global, webhook)
 }
 
 func token() error {
@@ -165,40 +173,24 @@ func token() error {
 	return nil
 }
 
-func runWebhook(global context.Context, webhookHandler http.Handler, metrics *wd.Metrics) error {
-	var queue wd.Queue
-	if config.Queue > 0 {
-		queue = wd.Limited(config.Queue)
-	} else {
-		queue = wd.Unbound()
-	}
-
-	processor := wd.Async(wd.AsyncConfig{
-		Async:      config.asyncMode(),
-		Retries:    config.Retries,
-		Delay:      config.Delay,
-		Workers:    config.Workers,
-		Queue:      queue,
-		Registerer: prometheus.DefaultRegisterer,
-	}, webhookHandler)
-
+func runWebhook(global context.Context, webhooks *wd.Webhooks) error {
 	mux := http.NewServeMux()
 	if !config.DisableMetrics {
 		var metricsHandler = promhttp.Handler()
 		if config.SecureMetrics {
-			metricsHandler = protected(config.Secret, metricsHandler, metrics)
+			metricsHandler = protected(config.Secret, metricsHandler)
 		}
 		mux.Handle("/metrics", metricsHandler)
 	}
 
-	var mainHandler http.Handler = processor
+	var mainHandler http.Handler = webhooks
 
 	if config.PayloadSize > 0 {
 		mainHandler = wd.RequestSizeLimit(config.PayloadSize, mainHandler)
 	}
 
 	if len(config.Secret) > 0 {
-		mainHandler = protected(config.Secret, mainHandler, metrics)
+		mainHandler = protected(config.Secret, mainHandler)
 	}
 
 	if config.CORS {
@@ -229,7 +221,7 @@ func runWebhook(global context.Context, webhookHandler http.Handler, metrics *wd
 		go func(i int) {
 			defer wg.Done()
 			log.Println("worker", i, "started")
-			processor.Run(ctx)
+			webhooks.Run(ctx)
 		}(i)
 	}
 	defer wg.Done()
@@ -251,7 +243,7 @@ func runWebhook(global context.Context, webhookHandler http.Handler, metrics *wd
 	}
 }
 
-func protected(secret string, handler http.Handler, metrics *wd.Metrics) http.Handler {
+func protected(secret string, handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		tokenString := request.Header.Get("Authorization")
 		if tokenString == "" {
@@ -266,14 +258,12 @@ func protected(secret string, handler http.Handler, metrics *wd.Metrics) http.Ha
 			return []byte(secret), nil
 		})
 		if err != nil {
-			metrics.RecordForbidden(request.URL.Path)
 			writer.WriteHeader(http.StatusForbidden)
 			return
 		}
 
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok || !token.Valid {
-			metrics.RecordForbidden(request.URL.Path)
 			writer.WriteHeader(http.StatusForbidden)
 			return
 		}
@@ -288,7 +278,6 @@ func protected(secret string, handler http.Handler, metrics *wd.Metrics) http.Ha
 				}
 			}
 			if !allowed {
-				metrics.RecordForbidden(request.URL.Path)
 				writer.WriteHeader(http.StatusForbidden)
 				return
 			}
@@ -327,4 +316,11 @@ func (cfg Config) argType() wd.ArgType {
 	default:
 		return wd.ArgTypeStdin
 	}
+}
+
+func (cfg Config) queue() wd.Queue {
+	if config.Queue > 0 {
+		return wd.Limited(config.Queue)
+	}
+	return wd.Unbound()
 }

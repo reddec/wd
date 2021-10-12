@@ -112,6 +112,28 @@ which requires additional memory close double of request body size.
 
 Shorthand for `--payload` flag is `-p`.
 
+### Script specific parameter
+
+Since `0.1.0` it's possible to define script specific parameter by [extended attributes](https://en.wikipedia.org/wiki/Extended_file_attributes).
+It's optional and supported for most systems except Windows. In case of any error, xattrs will be ignored.
+
+The extended attributes applicable only for `serve` command.
+
+The following parameters can be used to override parameters provided during startup:
+
+| Attribute              | Type     | Overrides                   |
+|------------------------|----------|-----------------------------|
+| `user.webhook.async`   | bool     | `--async`                   |
+| `user.webhook.timeout` | duration | `--timeout`                 |
+| `user.webhook.delay`   | duration | `--delay`                   |
+| `user.webhook.retries` | int64    | `--retries`                 |
+
+> all values are in string Golang default representation
+
+For `user.webhook.async`:
+- `true` is equal to `--async forced` for the script
+- `false` is equal to `--async disabled` for the script
+
 ### Containers as webhooks
 
 `wd` can perfectly work with container runtime. Especially with podman,

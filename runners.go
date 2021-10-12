@@ -5,32 +5,57 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-type Runner interface {
-	// Command to execute. Returns nil if not applicable.
-	Command(req *http.Request) []string
+type Manifest struct {
+	Command []string
+	Async   bool
+	Timeout time.Duration
+	Retries uint
+	Delay   time.Duration
 }
 
-type RunnerFunc func(req *http.Request) []string
+func (m *Manifest) Binary() string {
+	return m.Command[0]
+}
 
-func (r RunnerFunc) Command(req *http.Request) []string {
-	return r(req)
+func (m *Manifest) Args() []string {
+	return m.Command[1:]
+}
+
+type Runner interface {
+	// Command to execute. Returns nil if not applicable. Default manifest should be used as base.
+	Command(req *http.Request, defaultManifest Manifest) *Manifest
+}
+
+type RunnerFunc func(req *http.Request, defaultManifest Manifest) *Manifest
+
+func (r RunnerFunc) Command(req *http.Request, defaultManifest Manifest) *Manifest {
+	return r(req, defaultManifest)
 }
 
 func StaticScript(command string, args ...string) RunnerFunc {
 	cli := append([]string{command}, args...)
-	return func(req *http.Request) []string {
-		return cli
+	return func(req *http.Request, d Manifest) *Manifest {
+		d.Command = cli
+		return &d
 	}
 }
+
+const (
+	AttrAsync   = "user.webhook.async"   // boolean (true/false), forces async execution for script
+	AttrTimeout = "user.webhook.timeout" // duration, maximum execution time
+	AttrDelay   = "user.webhook.delay"   // duration, interval between attempts
+	AttrRetries = "user.webhook.retries" // int64, maximum number of additional attempts
+)
 
 type DirectoryRunner struct {
 	AllowDotFiles bool   // allows run scripts with leading dot in names
 	ScriptsDir    string // path to directory with scripts. MUST be absolute
 }
 
-func (dr *DirectoryRunner) Command(req *http.Request) []string {
+func (dr *DirectoryRunner) Command(req *http.Request, defaultManifest Manifest) *Manifest {
 	absScriptPath, err := filepath.Abs(filepath.Join(dr.ScriptsDir, req.URL.Path))
 	if err != nil {
 		log.Println("failed detect absolute path:", err)
@@ -47,7 +72,12 @@ func (dr *DirectoryRunner) Command(req *http.Request) []string {
 		return nil
 	}
 
-	return []string{absScriptPath}
+	defaultManifest.Command = []string{absScriptPath}
+	if err := readAttrs(absScriptPath, &defaultManifest); err != nil {
+		log.Println("failed read x-attrs:", err)
+	}
+
+	return &defaultManifest
 }
 
 func (dr *DirectoryRunner) isPathAllowed(scriptPath string) bool {

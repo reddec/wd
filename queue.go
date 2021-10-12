@@ -6,12 +6,17 @@ import (
 	"sync"
 )
 
-// Queue for storing string values for async processing.
+type QueuedWebhook struct {
+	RequestFile string
+	Manifest    *Manifest
+}
+
+// Queue for storing values for async processing.
 type Queue interface {
 	// Push value to queue to the back.
-	Push(ctx context.Context, value string) error
+	Push(ctx context.Context, manifest *QueuedWebhook) error
 	// Pop value from front and remove it.
-	Pop(ctx context.Context) (string, error)
+	Pop(ctx context.Context) (*QueuedWebhook, error)
 }
 
 // Unbound in-memory queue.
@@ -28,7 +33,7 @@ type inMemory struct {
 	notify  chan struct{}
 }
 
-func (q *inMemory) Push(_ context.Context, value string) error {
+func (q *inMemory) Push(_ context.Context, value *QueuedWebhook) error {
 	q.lock.Lock()
 	q.content.PushBack(value)
 	q.lock.Unlock()
@@ -40,7 +45,7 @@ func (q *inMemory) Push(_ context.Context, value string) error {
 	return nil
 }
 
-func (q *inMemory) Pop(ctx context.Context) (string, error) {
+func (q *inMemory) Pop(ctx context.Context) (*QueuedWebhook, error) {
 	for {
 		q.lock.Lock()
 		elem := q.content.Front()
@@ -50,12 +55,12 @@ func (q *inMemory) Pop(ctx context.Context) (string, error) {
 		q.lock.Unlock()
 
 		if elem != nil {
-			return elem.Value.(string), nil
+			return elem.Value.(*QueuedWebhook), nil
 		}
 
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return nil, ctx.Err()
 		case <-q.notify:
 		}
 	}
@@ -63,14 +68,14 @@ func (q *inMemory) Pop(ctx context.Context) (string, error) {
 
 // Limited in-memory queue with predefined maximum size
 func Limited(size int) Queue {
-	return &boundQueue{queue: make(chan string, size)}
+	return &boundQueue{queue: make(chan *QueuedWebhook, size)}
 }
 
 type boundQueue struct {
-	queue chan string
+	queue chan *QueuedWebhook
 }
 
-func (q *boundQueue) Push(ctx context.Context, value string) error {
+func (q *boundQueue) Push(ctx context.Context, value *QueuedWebhook) error {
 	select {
 	case q.queue <- value:
 		return nil
@@ -79,11 +84,11 @@ func (q *boundQueue) Push(ctx context.Context, value string) error {
 	}
 }
 
-func (q *boundQueue) Pop(ctx context.Context) (string, error) {
+func (q *boundQueue) Pop(ctx context.Context) (*QueuedWebhook, error) {
 	select {
 	case value := <-q.queue:
 		return value, nil
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return nil, ctx.Err()
 	}
 }
